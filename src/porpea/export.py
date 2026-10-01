@@ -49,15 +49,30 @@ def latest_run_dir(con, cfg: dict) -> Path:
     return Path(cfg["out_dir"]) / run_id
 
 
-def serve(directory: Path, port: int = 8000) -> None:
-    """Serve map.html over http://localhost so tile servers receive a Referer."""
+def serve(directory: Path, port: int = 8765) -> None:
+    """Serve map.html over http://127.0.0.1 so tile servers receive a Referer.
+
+    Uses 127.0.0.1 rather than "localhost": on macOS localhost may resolve to ::1,
+    where another local app could be listening on the same port.
+    """
     import functools
     import webbrowser
     from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
+    if not (directory / "map.html").exists():
+        raise SystemExit(f"{directory / 'map.html'} not found; run `porpea export` first")
     handler = functools.partial(SimpleHTTPRequestHandler, directory=str(directory))
-    with ThreadingHTTPServer(("127.0.0.1", port), handler) as httpd:
-        url = f"http://localhost:{port}/map.html"
+    for candidate in range(port, port + 20):
+        try:
+            httpd = ThreadingHTTPServer(("127.0.0.1", candidate), handler)
+            break
+        except OSError:
+            continue
+    else:
+        raise SystemExit(f"no free port in {port}-{port + 19}; try --port")
+    with httpd:
+        url = f"http://127.0.0.1:{httpd.server_address[1]}/map.html"
+        print(f"[serve] {directory}")
         print(f"[serve] {url}  (Ctrl+C to stop)")
         webbrowser.open(url)
         try:

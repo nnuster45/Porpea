@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--top", type=int)
     p = sub.add_parser("serve", help="open the latest map.html via http://localhost")
     p.add_argument("--run-id")
-    p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--port", type=int, default=8765)
     sub.add_parser("analyze", help="candidates + features + score + export")
     sub.add_parser("demo-seed", help="insert synthetic Chonburi data for a dry run")
 
