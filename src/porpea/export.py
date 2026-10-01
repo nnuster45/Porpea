@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from porpea.analysis import PointIndex, active_pois
+from porpea.analysis import PointIndex, active_pois, build_zones
 
 MAP_TEMPLATE = """<!doctype html>
 <html lang="th"><head><meta charset="utf-8">
@@ -239,6 +239,9 @@ def export(con, cfg: dict, run_id: str | None = None, top_n: int | None = None) 
     run_id = run_id or con.execute(
         "SELECT run_id FROM score_run ORDER BY created_at DESC LIMIT 1").fetchone()[0]
     top_n = top_n or cfg["export"]["top_n"]
+    # Runs scored before zones existed (or via an older version) have no zones yet.
+    if not con.execute("SELECT count(*) FROM zone WHERE run_id = ?", [run_id]).fetchone()[0]:
+        build_zones(con, cfg, run_id)
     markets = con.execute("""
         SELECT s.rank, s.score, s.flags, zm.zone_id, z.rank AS zone_rank, z.score AS zone_score, c.*
         FROM candidate_score s
@@ -262,7 +265,7 @@ def export(con, cfg: dict, run_id: str | None = None, top_n: int | None = None) 
     out_dir.mkdir(parents=True, exist_ok=True)
     markets.head(top_n).to_csv(out_dir / "top_markets.csv", index=False, encoding="utf-8-sig")
     zone_csv = zones.drop(columns="summary").join(
-        pd.DataFrame([json.loads(s) for s in zones.summary]).drop(columns="markets").add_prefix("env_"))
+        pd.DataFrame([json.loads(s) for s in zones.summary]).drop(columns="markets", errors="ignore").add_prefix("env_"))
     zone_csv.to_csv(out_dir / "zones.csv", index=False, encoding="utf-8-sig")
 
     feature_cols = list(wide.columns)

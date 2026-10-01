@@ -90,3 +90,15 @@ def test_zones_link_chained_markets():
     groups = sorted(sorted(g) for g in analysis._cluster(df, 1500))
     assert groups == [[0, 1, 2], [3]]
     assert analysis._zone_score([90, 80, 70, 10], "top3_mean") == 80
+
+
+def test_export_builds_zones_for_runs_scored_without_them(tmp_path):
+    cfg = _cfg(tmp_path)
+    con = connect(cfg)
+    demo.seed(con, cfg)
+    analysis.build_candidates(con, cfg)
+    analysis.compute_features(con, cfg)
+    run_id = analysis.score(con, cfg)  # no build_zones, like an older run
+    out = export.export(con, cfg, run_id)
+    assert con.execute("SELECT count(*) FROM zone WHERE run_id = ?", [run_id]).fetchone()[0] > 0
+    assert (out / "zones.csv").exists()
