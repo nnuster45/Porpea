@@ -37,7 +37,9 @@ def test_demo_pipeline_end_to_end(tmp_path):
     geo = json.loads((out / "markets.geojson").read_text(encoding="utf-8"))
     assert len(geo["features"]) == n
     assert all(f["properties"]["zone_id"] for f in geo["features"])
-    assert (out / "zones.csv").exists() and (out / "map.html").exists()
+    assert (out / "zones.csv").exists()
+    html = (out / "map.html").read_text(encoding="utf-8")
+    assert "__ENV__" not in html and '["convenience_711",' in html
 
 
 def test_dedupe_prefers_google_and_excludes_anchor(tmp_path):

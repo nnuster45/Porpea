@@ -46,7 +46,7 @@ porpea analyze
 - `zones.csv` — อันดับโซน, จำนวนตลาด, ตลาดที่ดีสุด, จำนวน 7-11/CJ/ห้าง/ที่ทำงาน/ประชากรในโซน
 - `top_markets.csv` — ตลาดเรียงตามคะแนน (มีคอลัมน์โซน) import เข้า Google My Maps ได้ทันที
 - `markets.geojson` — เปิดใน kepler.gl / QGIS
-- `map.html` — แผนที่โซน + หมุดตลาด (เปิดด้วย `porpea serve`)
+- `map.html` — แผนที่โซน + หมุดตลาด คลิกตลาดแล้วจะเห็นหมุด 7-11/CJ/ห้าง/ที่ทำงาน/โรงเรียน ฯลฯ รอบตลาดพร้อมระยะ (เปิดด้วย `porpea serve`)
 
 ปรับ factor / รัศมี / น้ำหนัก / ระยะรวมโซน (`zones.link_m`) ได้ที่ `config/settings.yaml` แล้วรัน `porpea analyze` ใหม่
 
