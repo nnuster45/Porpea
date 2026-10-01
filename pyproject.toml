@@ -1,0 +1,19 @@
+[project]
+name = "porpea"
+version = "0.1.0"
+description = "Location screening pipeline for a fried spring roll (เปาะเปี๊ยะทอด) shop"
+requires-python = ">=3.10"
+dependencies = ["duckdb>=1.0", "h3>=4.0", "pandas>=2.0", "requests>=2.31", "pyyaml>=6.0"]
+
+[project.scripts]
+porpea = "porpea.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+porpea = ["schema.sql"]

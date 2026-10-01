@@ -1,0 +1,115 @@
+# ===== Porpea: ตั้งค่าการคัดกรองทำเลร้านเปาะเปี๊ยะทอด =====
+# path ทั้งหมดอ้างอิงจากโฟลเดอร์ที่รันคำสั่ง (root ของ repo)
+
+area:
+  name: chonburi
+  iso3166_2: TH-20                       # รหัสจังหวัดชลบุรีใน OSM
+  bbox: [12.50, 100.80, 13.62, 101.75]   # [south, west, north, east]
+
+db_path: data/porpea.duckdb
+raw_dir: data/raw        # เก็บ response ดิบทุกครั้ง (ไว้ย้อนดู/ประมวลผลใหม่ได้)
+out_dir: data/out
+
+# ---------- แหล่งที่ 1: OpenStreetMap (ฟรี) ----------
+osm:
+  endpoint: https://overpass-api.de/api/interpreter
+  timeout_s: 180
+  pause_s: 5               # เว้นระยะระหว่าง query (fair use)
+  categories:
+    convenience_711:
+      - 'nwr["shop"="convenience"]["brand:wikidata"="Q259340"]'
+      - 'nwr["shop"="convenience"]["name"~"7-Eleven|7-11|เซเว่น",i]'
+    convenience_other:
+      - 'nwr["shop"="convenience"]["brand:wikidata"!="Q259340"]["name"!~"7-Eleven|7-11|เซเว่น",i]'
+    market:
+      - 'nwr["amenity"="marketplace"]'
+      - 'nwr["name"~"^ตลาด"]["shop"!~"."]["amenity"!~"school|bank"]'
+    school:
+      - 'nwr["amenity"="school"]'
+    university:
+      - 'nwr["amenity"~"university|college"]'
+    hospital:
+      - 'nwr["amenity"="hospital"]'
+    bus_stop:
+      - 'node["highway"="bus_stop"]'
+      - 'node["public_transport"="platform"]'
+    dormitory:
+      - 'nwr["building"="dormitory"]'
+      - 'nwr["name"~"หอพัก|อพาร์ทเม้นท์|อพาร์ตเมนต์|แมนชั่น"]'
+    industrial:
+      - 'way["landuse"="industrial"]'
+    food:
+      - 'nwr["amenity"~"fast_food|restaurant|food_court|cafe"]'
+    competitor:
+      - 'nwr["name"~"เปาะเปี๊ยะ|ปอเปี๊ยะ|ปอเปี้ยะ|spring roll",i]'
+
+# ---------- แหล่งที่ 2: Google Places API (New) — เสียเงิน, ข้อมูลครบกว่า ----------
+google_places:
+  api_key_env: GOOGLE_MAPS_API_KEY
+  tile_km: 5                    # แบ่งจังหวัดเป็นกริด แล้วค้นทีละช่อง
+  max_depth: 3                  # ถ้าช่องไหนได้ครบ 60 ผล (เพดาน API) จะผ่า 4 ช่องย่อย
+  min_tile_population: 2000     # ข้ามช่องที่ไม่มีคน (ทะเล/ป่า) — ต้องโหลด population ก่อน
+  pause_s: 0.2
+  queries:
+    convenience_711: { text: "7-Eleven", name_regex: "7-?eleven|7-?11|เซเว่น" }
+    market:          { text: "ตลาด" , name_regex: "ตลาด|market" }
+    competitor:      { text: "เปาะเปี๊ยะทอด", name_regex: "เปาะเปี๊ยะ|ปอเปี๊ยะ|ปอเปี้ยะ" }
+    # เพิ่มได้ตามต้องการ เช่น
+    # university:    { text: "มหาวิทยาลัย" }
+    # factory_gate:  { text: "นิคมอุตสาหกรรม" }
+
+# ลำดับความเชื่อถือเมื่อจุดเดียวกันมาจากหลายแหล่ง (ซ้ำกันในระยะ dedupe_m)
+source_priority: [google, osm]
+dedupe_m: 40
+
+# ---------- จุดผู้สมัคร (candidate) ----------
+# แนวคิด: ร้านเปาะเปี๊ยะส่วนใหญ่ไปตั้งหน้า 7-11 / ในตลาด → ใช้จุดเหล่านี้เป็นตัวตั้ง
+candidates:
+  anchor_categories: [convenience_711, market]
+
+# ---------- feature ที่คำนวณรอบแต่ละจุด ----------
+# type: count | sum | nearest | population | factory_workers | anchor
+features:
+  - { name: pop_500,          type: population,      radius_m: 500 }
+  - { name: pop_1000,         type: population,      radius_m: 1000 }
+  - { name: n_711_500,        type: count,   categories: [convenience_711], radius_m: 500 }
+  - { name: n_conv_other_500, type: count,   categories: [convenience_other], radius_m: 500 }
+  - { name: n_market_500,     type: count,   categories: [market], radius_m: 500 }
+  - { name: n_school_500,     type: count,   categories: [school], radius_m: 500 }
+  - { name: n_univ_1000,      type: count,   categories: [university], radius_m: 1000 }
+  - { name: n_hospital_1000,  type: count,   categories: [hospital], radius_m: 1000 }
+  - { name: n_busstop_300,    type: count,   categories: [bus_stop], radius_m: 300 }
+  - { name: n_dorm_500,       type: count,   categories: [dormitory], radius_m: 500 }
+  - { name: n_food_300,       type: count,   categories: [food], radius_m: 300 }
+  - { name: workers_2000,     type: factory_workers, radius_m: 2000, transform: log1p }
+  - { name: reviews_500,      type: sum, field: rating_count, categories: [convenience_711, market, food], radius_m: 500, transform: log1p }
+  - { name: anchor_reviews,   type: anchor, field: rating_count, transform: log1p }
+  - { name: n_competitor_300, type: count,   categories: [competitor], radius_m: 300 }
+  - { name: dist_competitor,  type: nearest, categories: [competitor], cap_m: 2000 }
+
+# ---------- น้ำหนักคะแนน (บวก = ดี, ลบ = แย่) ----------
+# คะแนนแต่ละ feature ถูกแปลงเป็น percentile 0..1 ภายในจังหวัดก่อนคูณน้ำหนัก
+weights:
+  pop_500: 0.15
+  pop_1000: 0.05
+  n_711_500: 0.10
+  n_market_500: 0.10
+  n_school_500: 0.10
+  n_univ_1000: 0.03
+  n_hospital_1000: 0.02
+  n_busstop_300: 0.05
+  n_dorm_500: 0.05
+  n_food_300: 0.05
+  workers_2000: 0.10
+  reviews_500: 0.10
+  anchor_reviews: 0.10
+  n_competitor_300: -0.15
+  dist_competitor: 0.05
+
+# ---------- กฎตัดทิ้ง/ติดธง ----------
+flags:
+  competitor_within_m: 100      # มีคู่แข่งในรัศมีนี้ → ติดธง
+  min_pop_1000: 1000            # คนรอบ 1 กม. น้อยกว่านี้ → ติดธง
+
+export:
+  top_n: 50

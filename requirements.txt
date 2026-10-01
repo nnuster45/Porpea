@@ -1,0 +1,5 @@
+duckdb>=1.0
+h3>=4.0
+pandas>=2.0
+requests>=2.31
+pyyaml>=6.0
