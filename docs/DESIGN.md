@@ -70,13 +70,17 @@
 
 ---
 
-## 3. แนวคิดหลักของระบบ: "จุดผู้สมัคร" + "วงรัศมี"
+## 3. แนวคิดหลักของระบบ: "หมุด = ตลาด" + "โซน"
 
-แทนที่จะให้คะแนนทุกตารางเมตรของจังหวัด เราใช้ **จุดที่ร้านเปาะเปี๊ยะจะไปตั้งจริง** เป็นตัวตั้ง:
+1. **หมุด = ตลาดทุกแห่ง** ในชลบุรี (ตลาดสด ตลาดนัด ตลาดโต้รุ่ง) — เป็นที่ที่จะไปตั้งร้าน
+2. **ให้คะแนนตลาด** จากสภาพแวดล้อมรอบๆ: 7-11, CJ More, ร้านสะดวกซื้ออื่น, ห้าง/Big C/Lotus's/Makro,
+   สถานที่ทำงาน (ออฟฟิศ ราชการ ธนาคาร โรงงาน), โรงเรียน, หอพัก, ประชากร, ความดังของตลาดเอง (จำนวนรีวิว), คู่แข่ง
+3. **รวมตลาดที่อยู่ใกล้กันเป็นโซน** — ตลาดที่ห่างกันไม่เกิน 1.5 กม. (ต่อกันเป็นทอดๆ ได้) อยู่โซนเดียวกัน
+4. **ให้คะแนนโซน** = ค่าเฉลี่ยคะแนน 3 ตลาดที่ดีที่สุดในโซน + โบนัสเล็กน้อยถ้าโซนมีตลาดหลายแห่ง (`size_weight`)
+   และสรุปสภาพแวดล้อมของทั้งโซน (นับไม่ซ้ำในรัศมี 1 กม. ของตลาดใดก็ได้ในโซน)
+5. ใช้งาน: **เลือกโซนจากอันดับ → ในโซนนั้นดูว่าตลาดไหนดีสุด → ลงพื้นที่**
 
-- **Candidate = 7-11 ทุกสาขา + ตลาดทุกแห่ง** ในชลบุรี (ปรับใน `candidates.anchor_categories`)
-- รอบแต่ละจุด นับสิ่งต่างๆ ในรัศมี 300 ม. (เดินถึง), 500 ม., 1–2 กม. (ขี่มอไซค์มา)
-- ใช้ **H3 hexagon resolution 9 (~0.1 ตร.กม.)** เป็น spatial index ให้นับรัศมีได้เร็ว และใช้เป็นหน่วยรวมข้อมูลประชากร
+การนับในรัศมีใช้ **H3 hexagon resolution 9 (~0.1 ตร.กม.)** เป็น spatial index
 
 ```mermaid
 flowchart LR
@@ -103,10 +107,11 @@ flowchart LR
   C1 & C2 & C3 & C4 --> DB
   MAN --> DB
   DB --> D[Dedupe ข้ามแหล่ง]
-  D --> CAND[Candidates<br/>7-11 + ตลาด]
+  D --> CAND[หมุด = ตลาด]
   CAND --> F[Features<br/>นับในรัศมีด้วย H3]
   F --> S[Score<br/>percentile x weight]
-  S --> E[Export<br/>CSV / GeoJSON / map.html]
+  S --> Z[Zones<br/>รวมตลาดใกล้กัน]
+  Z --> E[Export<br/>zones.csv / map.html]
   E --> V[ลงพื้นที่ Top-N<br/>บันทึก field_visit]
   V -. ปรับน้ำหนัก .-> S
 ```
@@ -172,10 +177,12 @@ Schema เต็มอยู่ที่ [`src/porpea/schema.sql`](../src/porpea
 | `factory` | โรงงาน 1 แห่ง | `lat/lon`, `workers`, `industry` |
 | `rent_listing` | ประกาศเช่า 1 รายการ | `price_thb_month`, `area_sqm`, `listing_type` |
 | `popular_times` | ความแน่นราย ชม. ของ POI | `poi_uid`, `dow`, `hour`, `busyness` |
-| `candidate` | จุดผู้สมัคร 1 จุด | `anchor_poi_uid`, `anchor_category`, `lat/lon` |
+| `candidate` | ตลาด 1 แห่ง (หมุด) | `anchor_poi_uid`, `anchor_category`, `lat/lon` |
 | `candidate_feature` | ค่า feature 1 ตัว ของ 1 จุด (long format) | `candidate_id`, `feature`, `value` |
 | `score_run` | การให้คะแนน 1 ครั้ง | `run_id`, `config` (น้ำหนักที่ใช้) |
 | `candidate_score` | คะแนนของ 1 จุดใน 1 run | `score` 0–100, `rank`, `breakdown` (JSON), `flags` |
+| `zone` | โซน 1 โซน ใน 1 run | `zone_id`, `rank`, `score`, `n_markets`, `best_candidate_id`, `summary` (JSON) |
+| `zone_member` | ตลาด 1 แห่งอยู่โซนไหน | `run_id`, `zone_id`, `candidate_id` |
 | `field_visit` | การลงพื้นที่ 1 ครั้ง | `foot_traffic_15min`, `rent_quote_thb`, `verdict` |
 | `fetch_log` | การดึงข้อมูล 1 ครั้ง | `source`, `query`, `n_items`, `raw_path` |
 
@@ -202,7 +209,7 @@ data/out/<run_id>/                    ← ผลลัพธ์แต่ละ�
 ## 6. Pipeline การวิเคราะห์
 
 1. **Dedupe ข้ามแหล่ง** — 7-11 สาขาเดียวกันอาจมาจากทั้ง Google และ OSM → ถ้าหมวดเดียวกันห่างกัน ≤ 40 ม. เก็บแหล่งที่น่าเชื่อกว่า (`source_priority: [google, osm]`) และตัดร้านที่ `CLOSED_PERMANENTLY` ทิ้ง
-2. **Candidates** — 7-11 + ตลาด ที่เหลือหลัง dedupe
+2. **Candidates** — ตลาดทุกแห่งที่เหลือหลัง dedupe (ปรับได้ที่ `candidates.anchor_categories`)
 3. **Features** (กำหนดใน config ไม่ต้องแก้โค้ด) — ประเภทที่รองรับ:
    - `count` นับจุดหมวดที่กำหนดในรัศมี (ไม่นับตัวเอง)
    - `sum` รวมค่า field เช่น `rating_count` ในรัศมี
@@ -216,7 +223,8 @@ data/out/<run_id>/                    ← ผลลัพธ์แต่ละ�
    - คูณน้ำหนัก (ลบ = เป็นผลเสีย เช่นคู่แข่ง) แล้วสเกลเป็น 0–100
    - `breakdown` เก็บว่าแต่ละ feature ให้คะแนนเท่าไหร่ → อธิบายได้ว่าทำไมจุดนี้ติดอันดับ
    - `flags` เตือน เช่น `competitor_close` (มีคู่แข่งใน 100 ม.), `low_population`
-5. **Export** — `top_candidates.csv` (import เข้า **Google My Maps** ได้ทันทีเพื่อวางแผนเส้นทางลงพื้นที่), `.geojson` (เปิดใน kepler.gl/QGIS), `map.html` (แผนที่คลิกดูคะแนนย่อยได้)
+5. **Zones** — รวมตลาดใกล้กัน (single-linkage, `zones.link_m`) แล้วให้คะแนนและสรุปสภาพแวดล้อมรายโซน
+6. **Export** — `zones.csv` (อันดับโซน + จำนวน 7-11/CJ/ห้าง/ที่ทำงานในโซน), `top_markets.csv` (import เข้า **Google My Maps** ได้), `markets.geojson`, `map.html` (รายการโซนด้านซ้าย คลิกแล้วซูมไปโซนนั้น)
 
 ### น้ำหนักเริ่มต้น (สมมติฐาน — ปรับตามผลลงพื้นที่)
 

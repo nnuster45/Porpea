@@ -19,17 +19,25 @@ def test_demo_pipeline_end_to_end(tmp_path):
     con = connect(cfg)
     demo.seed(con, cfg)
     n = analysis.build_candidates(con, cfg)
-    assert n == 160  # 120 x 7-11 + 40 markets
+    assert n == 80  # only markets are pins
     analysis.compute_features(con, cfg)
     run_id = analysis.score(con, cfg)
     scores = con.execute(
         "SELECT min(score), max(score), count(*) FROM candidate_score WHERE run_id = ?",
         [run_id]).fetchone()
     assert 0 <= scores[0] < scores[1] <= 100 and scores[2] == n
+    n_zones = analysis.build_zones(con, cfg, run_id)
+    assert 1 <= n_zones < n
+    assert con.execute("SELECT count(*) FROM zone_member WHERE run_id = ?",
+                       [run_id]).fetchone()[0] == n
+    top = con.execute("SELECT summary FROM zone WHERE run_id = ? AND rank = 1",
+                      [run_id]).fetchone()[0]
+    assert {"markets", "convenience_711", "cj_more", "mall", "office"} <= set(json.loads(top))
     out = export.export(con, cfg, run_id, 10)
-    geo = json.loads((out / "top_candidates.geojson").read_text(encoding="utf-8"))
-    assert len(geo["features"]) == 10
-    assert geo["features"][0]["properties"]["rank"] == 1
+    geo = json.loads((out / "markets.geojson").read_text(encoding="utf-8"))
+    assert len(geo["features"]) == n
+    assert all(f["properties"]["zone_id"] for f in geo["features"])
+    assert (out / "zones.csv").exists() and (out / "map.html").exists()
 
 
 def test_dedupe_prefers_google_and_excludes_anchor(tmp_path):
@@ -52,6 +60,7 @@ def test_dedupe_prefers_google_and_excludes_anchor(tmp_path):
     cfg["features"] = [{"name": "n_711_500", "type": "count",
                         "categories": ["convenience_711"], "radius_m": 500}]
     cfg["weights"] = {"n_711_500": 1.0}
+    cfg["candidates"]["anchor_categories"] = ["convenience_711"]
     analysis.build_candidates(con, cfg)
     analysis.compute_features(con, cfg)
     vals = dict(con.execute("SELECT candidate_id, value FROM candidate_feature").fetchall())
@@ -68,3 +77,14 @@ def test_overpass_query_and_parse():
     ], "market")
     assert [r["poi_uid"] for r in rows] == ["osm:market:node/1", "osm:market:way/2"]
     assert rows[0]["name"] == "ตลาดหนองมน"
+
+
+def test_zones_link_chained_markets():
+    import pandas as pd
+    from porpea.common import to_h3
+    # A-B 1.1 km, B-C 1.1 km (chain -> one zone), D far away
+    pts = [(13.0000, 100.9), (13.0100, 100.9), (13.0200, 100.9), (13.2000, 100.9)]
+    df = pd.DataFrame([{"lat": a, "lon": b, "h3_r9": to_h3(a, b)} for a, b in pts])
+    groups = sorted(sorted(g) for g in analysis._cluster(df, 1500))
+    assert groups == [[0, 1, 2], [3]]
+    assert analysis._zone_score([90, 80, 70, 10], "top3_mean") == 80

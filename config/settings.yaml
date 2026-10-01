@@ -19,8 +19,16 @@ osm:
     convenience_711:
       - 'nwr["shop"="convenience"]["brand:wikidata"="Q259340"]'
       - 'nwr["shop"="convenience"]["name"~"7-Eleven|7-11|เซเว่น",i]'
-    convenience_other:
-      - 'nwr["shop"="convenience"]["brand:wikidata"!="Q259340"]["name"!~"7-Eleven|7-11|เซเว่น",i]'
+    cj_more:
+      - 'nwr["shop"~"convenience|supermarket"]["name"~"CJ|ซีเจ",i]'
+    convenience_other:          # FamilyMart, Lotus's go fresh, Tops daily, ร้านสะดวกซื้ออื่นๆ
+      - 'nwr["shop"="convenience"]["brand:wikidata"!="Q259340"]["name"!~"7-Eleven|7-11|เซเว่น|CJ|ซีเจ",i]'
+    mall:                       # ห้าง / ไฮเปอร์มาร์เก็ต
+      - 'nwr["shop"~"^(mall|department_store)$"]'
+      - 'nwr["shop"~"supermarket|wholesale"]["name"~"Big ?C|บิ๊กซี|Lotus|โลตัส|Makro|แม็คโคร|Tops|ท็อปส์|Robinson|โรบินสัน|Central|เซ็นทรัล",i]["name"!~"go fresh|express|mini|daily",i]'
+    office:                     # สถานที่ทำงาน: ออฟฟิศ ราชการ ธนาคาร
+      - 'nwr["office"]'
+      - 'nwr["amenity"~"^(townhall|courthouse|police|post_office|bank)$"]'
     market:
       - 'nwr["amenity"="marketplace"]'
       - 'nwr["name"~"^ตลาด"]["shop"!~"."]["amenity"!~"school|bank"]'
@@ -51,8 +59,13 @@ google_places:
   min_tile_population: 2000     # ข้ามช่องที่ไม่มีคน (ทะเล/ป่า) — ต้องโหลด population ก่อน
   pause_s: 0.2
   queries:
+    # text เป็น string เดียวหรือ list ก็ได้ (list = ค้นหลายคำแล้วรวมเป็นหมวดเดียว)
+    market:          { text: ["ตลาด", "ตลาดนัด"], name_regex: "ตลาด|market" }
     convenience_711: { text: "7-Eleven", name_regex: "7-?eleven|7-?11|เซเว่น" }
-    market:          { text: "ตลาด" , name_regex: "ตลาด|market" }
+    cj_more:         { text: ["CJ More", "CJ Express"], name_regex: "CJ|ซีเจ" }
+    mall:
+      text: ["ห้างสรรพสินค้า", "Big C", "Lotus's", "Makro"]
+      name_regex: "Big ?C|บิ๊กซี|Lotus|โลตัส|Makro|แม็คโคร|Central|เซ็นทรัล|Robinson|โรบินสัน|Tops|ท็อปส์|ห้าง|plaza|พลาซ่า|mall|มอลล์"
     competitor:      { text: "เปาะเปี๊ยะทอด", name_regex: "เปาะเปี๊ยะ|ปอเปี๊ยะ|ปอเปี้ยะ" }
     # เพิ่มได้ตามต้องการ เช่น
     # university:    { text: "มหาวิทยาลัย" }
@@ -62,54 +75,74 @@ google_places:
 source_priority: [google, osm]
 dedupe_m: 40
 
-# ---------- จุดผู้สมัคร (candidate) ----------
-# แนวคิด: ร้านเปาะเปี๊ยะส่วนใหญ่ไปตั้งหน้า 7-11 / ในตลาด → ใช้จุดเหล่านี้เป็นตัวตั้ง
+# ---------- หมุด (candidate) = ตลาด ----------
+# ให้คะแนนตลาดแต่ละแห่งจากสภาพแวดล้อมรอบๆ แล้วรวมตลาดที่อยู่ใกล้กันเป็น "โซน"
 candidates:
-  anchor_categories: [convenience_711, market]
+  anchor_categories: [market]
 
-# ---------- feature ที่คำนวณรอบแต่ละจุด ----------
+# ---------- สภาพแวดล้อมรอบตลาด (feature) ----------
 # type: count | sum | nearest | population | factory_workers | anchor
 features:
+  # คนอยู่อาศัย
   - { name: pop_500,          type: population,      radius_m: 500 }
   - { name: pop_1000,         type: population,      radius_m: 1000 }
+  # ร้านค้า/ห้าง = ตัวบอกทราฟฟิก
   - { name: n_711_500,        type: count,   categories: [convenience_711], radius_m: 500 }
+  - { name: n_cj_500,         type: count,   categories: [cj_more], radius_m: 500 }
   - { name: n_conv_other_500, type: count,   categories: [convenience_other], radius_m: 500 }
-  - { name: n_market_500,     type: count,   categories: [market], radius_m: 500 }
+  - { name: n_mall_1500,      type: count,   categories: [mall], radius_m: 1500 }
+  - { name: reviews_500,      type: sum, field: rating_count, categories: [convenience_711, cj_more, mall, food], radius_m: 500, transform: log1p }
+  - { name: anchor_reviews,   type: anchor, field: rating_count, transform: log1p }   # ความดังของตลาดเอง
+  # สถานที่ทำงาน
+  - { name: n_office_500,     type: count,   categories: [office], radius_m: 500 }
+  - { name: workers_2000,     type: factory_workers, radius_m: 2000, transform: log1p }
+  # แม่เหล็กดึงคนอื่นๆ
   - { name: n_school_500,     type: count,   categories: [school], radius_m: 500 }
   - { name: n_univ_1000,      type: count,   categories: [university], radius_m: 1000 }
   - { name: n_hospital_1000,  type: count,   categories: [hospital], radius_m: 1000 }
   - { name: n_busstop_300,    type: count,   categories: [bus_stop], radius_m: 300 }
   - { name: n_dorm_500,       type: count,   categories: [dormitory], radius_m: 500 }
   - { name: n_food_300,       type: count,   categories: [food], radius_m: 300 }
-  - { name: workers_2000,     type: factory_workers, radius_m: 2000, transform: log1p }
-  - { name: reviews_500,      type: sum, field: rating_count, categories: [convenience_711, market, food], radius_m: 500, transform: log1p }
-  - { name: anchor_reviews,   type: anchor, field: rating_count, transform: log1p }
+  # คู่แข่ง
   - { name: n_competitor_300, type: count,   categories: [competitor], radius_m: 300 }
   - { name: dist_competitor,  type: nearest, categories: [competitor], cap_m: 2000 }
 
-# ---------- น้ำหนักคะแนน (บวก = ดี, ลบ = แย่) ----------
-# คะแนนแต่ละ feature ถูกแปลงเป็น percentile 0..1 ภายในจังหวัดก่อนคูณน้ำหนัก
+# ---------- น้ำหนักคะแนนตลาด (บวก = ดี, ลบ = แย่) ----------
+# แต่ละ feature ถูกแปลงเป็น percentile 0..1 เทียบกับตลาดทั้งจังหวัดก่อนคูณน้ำหนัก
 weights:
-  pop_500: 0.15
+  pop_500: 0.12
   pop_1000: 0.05
   n_711_500: 0.10
-  n_market_500: 0.10
-  n_school_500: 0.10
+  n_cj_500: 0.06
+  n_conv_other_500: 0.03
+  n_mall_1500: 0.07
+  reviews_500: 0.07
+  anchor_reviews: 0.10
+  n_office_500: 0.06
+  workers_2000: 0.10
+  n_school_500: 0.08
   n_univ_1000: 0.03
   n_hospital_1000: 0.02
-  n_busstop_300: 0.05
+  n_busstop_300: 0.03
   n_dorm_500: 0.05
-  n_food_300: 0.05
-  workers_2000: 0.10
-  reviews_500: 0.10
-  anchor_reviews: 0.10
+  n_food_300: 0.03
   n_competitor_300: -0.15
   dist_competitor: 0.05
 
-# ---------- กฎตัดทิ้ง/ติดธง ----------
+# ---------- กฎติดธง ----------
 flags:
   competitor_within_m: 100      # มีคู่แข่งในรัศมีนี้ → ติดธง
   min_pop_1000: 1000            # คนรอบ 1 กม. น้อยกว่านี้ → ติดธง
+
+# ---------- โซน ----------
+# ตลาดที่ห่างกันไม่เกิน link_m ต่อกันเป็นโซนเดียว (ต่อเป็นทอดๆ ได้)
+zones:
+  link_m: 1500
+  env_radius_m: 1000            # สรุปสภาพแวดล้อมโซน = สิ่งที่อยู่ในรัศมีนี้ของตลาดใดก็ได้ในโซน (นับไม่ซ้ำ)
+  score_method: top3_mean       # top3_mean | mean | max  (คะแนนตลาดในโซน)
+  size_weight: 0.2              # 0..1 สัดส่วนโบนัสโซนที่มีตลาดหลายแห่ง (0 = ดูแค่คุณภาพตลาด)
+  summary_categories: [convenience_711, cj_more, convenience_other, mall, office, school,
+                       university, hospital, dormitory, food, competitor]
 
 export:
   top_n: 50

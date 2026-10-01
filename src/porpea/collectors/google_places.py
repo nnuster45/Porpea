@@ -122,6 +122,11 @@ def to_rows(places: list[dict], category: str, name_regex: str | None) -> list[d
     return rows
 
 
+def _texts(q: dict) -> list[str]:
+    """A query's `text` may be one search string or a list of them."""
+    return [q["text"]] if isinstance(q["text"], str) else list(q["text"])
+
+
 def collect(con, cfg: dict, only: list[str] | None = None, dry_run: bool = False) -> None:
     gp = cfg["google_places"]
     tiles = make_tiles(cfg["area"]["bbox"], gp["tile_km"])
@@ -132,8 +137,9 @@ def collect(con, cfg: dict, only: list[str] | None = None, dry_run: bool = False
     else:
         print("[google] no population data loaded; searching every tile (costly)")
     queries = {k: v for k, v in gp["queries"].items() if not only or k in only}
-    print(f"[google] {len(tiles)} tiles x {len(queries)} queries "
-          f"= >= {len(tiles) * len(queries)} requests (before paging/splitting)")
+    n_texts = sum(len(_texts(q)) for q in queries.values())
+    print(f"[google] {len(tiles)} tiles x {n_texts} search texts "
+          f"= >= {len(tiles) * n_texts} requests (before paging/splitting)")
     if dry_run:
         return
 
@@ -145,9 +151,10 @@ def collect(con, cfg: dict, only: list[str] | None = None, dry_run: bool = False
 
     for category, q in queries.items():
         places: list[dict] = []
-        for tile in tiles:
-            places.extend(crawl(session, q["text"], tile, 0, gp["max_depth"], gp["pause_s"]))
+        for text in _texts(q):
+            for tile in tiles:
+                places.extend(crawl(session, text, tile, 0, gp["max_depth"], gp["pause_s"]))
         raw_path = save_raw(cfg, "google", category, places)
         n = upsert_pois(con, to_rows(places, category, q.get("name_regex")))
-        log_fetch(con, "google", q["text"], n, raw_path)
+        log_fetch(con, "google", " | ".join(_texts(q)), n, raw_path)
         print(f"[google] {category}: {n} POIs ({len(places)} raw results)")

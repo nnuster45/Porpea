@@ -28,14 +28,14 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--map", nargs="+", required=True, metavar="FIELD=COLUMN")
     sub.add_parser("candidates", help="build candidate list from anchor POIs")
     sub.add_parser("features", help="compute features around candidates")
-    sub.add_parser("score", help="score candidates with configured weights")
+    sub.add_parser("score", help="score markets and group them into zones")
     p = sub.add_parser("export", help="CSV/GeoJSON/map of top candidates")
     p.add_argument("--run-id")
     p.add_argument("--top", type=int)
     p = sub.add_parser("serve", help="open the latest map.html via http://localhost")
     p.add_argument("--run-id")
     p.add_argument("--port", type=int, default=8765)
-    sub.add_parser("analyze", help="candidates + features + score + export")
+    sub.add_parser("analyze", help="candidates + features + score + zones + export")
     sub.add_parser("demo-seed", help="insert synthetic Chonburi data for a dry run")
 
     args = ap.parse_args(argv)
@@ -56,7 +56,8 @@ def main(argv: list[str] | None = None) -> None:
     elif args.cmd == "features":
         analysis.compute_features(con, cfg)
     elif args.cmd == "score":
-        analysis.score(con, cfg)
+        run_id = analysis.score(con, cfg)
+        analysis.build_zones(con, cfg, run_id)
     elif args.cmd == "export":
         export.export(con, cfg, args.run_id, args.top)
     elif args.cmd == "serve":
@@ -68,6 +69,7 @@ def main(argv: list[str] | None = None) -> None:
         analysis.build_candidates(con, cfg)
         analysis.compute_features(con, cfg)
         run_id = analysis.score(con, cfg)
+        analysis.build_zones(con, cfg, run_id)
         export.export(con, cfg, run_id)
     elif args.cmd == "demo-seed":
         demo.seed(con, cfg)

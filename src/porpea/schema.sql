@@ -120,3 +120,25 @@ CREATE TABLE IF NOT EXISTS fetch_log (
     n_items    INTEGER,
     raw_path   VARCHAR
 );
+
+-- โซน = กลุ่มตลาดที่อยู่ใกล้กัน (คำนวณใหม่ทุก score run)
+CREATE TABLE IF NOT EXISTS zone (
+    run_id            VARCHAR,
+    zone_id           VARCHAR,          -- Z001 = โซนอันดับ 1
+    rank              INTEGER,
+    score             DOUBLE,           -- 0..100 จากคะแนนตลาดในโซน
+    n_markets         INTEGER,
+    lat               DOUBLE,           -- จุดกึ่งกลางโซน
+    lon               DOUBLE,
+    best_candidate_id VARCHAR,
+    best_score        DOUBLE,
+    summary           VARCHAR,          -- JSON: จำนวน 7-11/CJ/ห้าง/... ในโซน (นับไม่ซ้ำ)
+    PRIMARY KEY (run_id, zone_id)
+);
+
+CREATE TABLE IF NOT EXISTS zone_member (
+    run_id        VARCHAR,
+    zone_id       VARCHAR,
+    candidate_id  VARCHAR,
+    PRIMARY KEY (run_id, candidate_id)
+);

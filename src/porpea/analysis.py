@@ -72,7 +72,8 @@ class PointIndex:
     def add(self, cell: str, lat: float, lon: float, value: float, uid: str = ""):
         self.cells[cell].append((lat, lon, value, uid))
 
-    def within(self, lat, lon, radius_m, exclude_uid=None):
+    def items_within(self, lat, lon, radius_m, exclude_uid=None):
+        """Yield (distance_m, value, uid) for points within radius_m."""
         center = h3.latlng_to_cell(lat, lon, H3_RES)
         for cell in h3.grid_disk(center, ring_k(radius_m)):
             for plat, plon, val, uid in self.cells.get(cell, ()):
@@ -80,7 +81,11 @@ class PointIndex:
                     continue
                 d = haversine_m(lat, lon, plat, plon)
                 if d <= radius_m:
-                    yield d, val
+                    yield d, val, uid
+
+    def within(self, lat, lon, radius_m, exclude_uid=None):
+        for d, val, _ in self.items_within(lat, lon, radius_m, exclude_uid):
+            yield d, val
 
 
 def _population_index(con) -> PointIndex:
@@ -90,18 +95,18 @@ def _population_index(con) -> PointIndex:
             children = h3.cell_to_children(cell, H3_RES)
             share = pop / len(children)
             for ch in children:
-                idx.add(ch, *h3.cell_to_latlng(ch), share)
+                idx.add(ch, *h3.cell_to_latlng(ch), share, ch)
         else:
             parent = h3.cell_to_parent(cell, H3_RES) if res > H3_RES else cell
-            idx.add(parent, *h3.cell_to_latlng(cell), pop)
+            idx.add(parent, *h3.cell_to_latlng(cell), pop, cell)
     return idx
 
 
 def _factory_index(con) -> PointIndex:
     idx = PointIndex()
-    for cell, lat, lon, workers in con.execute(
-            "SELECT h3_r9, lat, lon, coalesce(workers, 0) FROM factory").fetchall():
-        idx.add(cell, lat, lon, workers)
+    for fid, cell, lat, lon, workers in con.execute(
+            "SELECT factory_id, h3_r9, lat, lon, coalesce(workers, 0) FROM factory").fetchall():
+        idx.add(cell, lat, lon, workers, fid)
     return idx
 
 
@@ -215,3 +220,104 @@ def score(con, cfg: dict) -> str:
     con.unregister("_score")
     print(f"[score] run {run_id}: scored {len(out)} candidates")
     return run_id
+
+
+# ---------- zones ----------
+
+def _cluster(points: pd.DataFrame, link_m: float) -> list[list[int]]:
+    """Single-linkage clustering: points within link_m (directly or via a chain) share a zone."""
+    parent = list(range(len(points)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    idx = PointIndex()
+    for i, r in enumerate(points.itertuples()):
+        idx.add(r.h3_r9, r.lat, r.lon, i)
+    for i, r in enumerate(points.itertuples()):
+        for _, j in idx.within(r.lat, r.lon, link_m):
+            parent[find(i)] = find(int(j))
+    groups: dict[int, list[int]] = defaultdict(list)
+    for i in range(len(points)):
+        groups[find(i)].append(i)
+    return list(groups.values())
+
+
+def _zone_score(scores: list[float], method: str) -> float:
+    s = sorted(scores, reverse=True)
+    if method == "max":
+        return s[0]
+    if method == "mean":
+        return sum(s) / len(s)
+    top = s[:3]
+    return sum(top) / len(top)
+
+
+def build_zones(con, cfg: dict, run_id: str) -> int:
+    zcfg = cfg["zones"]
+    cands = con.execute("""
+        SELECT c.*, s.score FROM candidate c
+        JOIN candidate_score s USING (candidate_id) WHERE s.run_id = ?
+    """, [run_id]).df()
+    pois = active_pois(con, cfg)
+    cat_idx: dict[str, PointIndex] = {}
+    for cat in zcfg["summary_categories"]:
+        idx = PointIndex()
+        for r in pois[pois.category == cat].itertuples():
+            idx.add(r.h3_r9, r.lat, r.lon, 1.0, r.poi_uid)
+        cat_idx[cat] = idx
+    pop_idx = _population_index(con)
+    fac_idx = _factory_index(con)
+    radius = zcfg["env_radius_m"]
+
+    zones, members = [], []
+    for group in _cluster(cands, zcfg["link_m"]):
+        g = cands.iloc[group]
+        exclude = set(g.candidate_id)
+        summary = {"markets": len(g)}
+        for cat, idx in cat_idx.items():
+            uids = {uid for r in g.itertuples()
+                    for _, _, uid in idx.items_within(r.lat, r.lon, radius)}
+            summary[cat] = len(uids - exclude)
+        pop = {uid: v for r in g.itertuples() for _, v, uid in pop_idx.items_within(r.lat, r.lon, radius)}
+        fac = {uid: v for r in g.itertuples() for _, v, uid in fac_idx.items_within(r.lat, r.lon, radius)}
+        summary["population"] = round(sum(pop.values()))
+        summary["factory_workers"] = int(sum(fac.values()))
+        best = g.loc[g.score.idxmax()]
+        zones.append({
+            "score": round(_zone_score(list(g.score), zcfg["score_method"]), 2),
+            "n_markets": len(g),
+            "lat": g.lat.mean(),
+            "lon": g.lon.mean(),
+            "best_candidate_id": best.candidate_id,
+            "best_score": best.score,
+            "summary": json.dumps(summary, ensure_ascii=False),
+            "_members": list(g.candidate_id),
+        })
+
+    # Blend in zone size so a cluster of good markets can outrank a lone one.
+    size_w = zcfg.get("size_weight", 0.0)
+    if size_w and zones:
+        size_pct = pd.Series([z["n_markets"] for z in zones]).rank(pct=True)
+        for z, pct in zip(zones, size_pct):
+            z["score"] = round((1 - size_w) * z["score"] + size_w * 100 * pct, 2)
+    zones.sort(key=lambda z: (-z["score"], -z["n_markets"]))
+    for rank, z in enumerate(zones, 1):
+        z["zone_id"] = f"Z{rank:03d}"
+        z["rank"] = rank
+        members += [(run_id, z["zone_id"], cid) for cid in z.pop("_members")]
+    zdf = pd.DataFrame(zones)
+    zdf.insert(0, "run_id", run_id)
+    zdf = zdf[["run_id", "zone_id", "rank", "score", "n_markets", "lat", "lon",
+               "best_candidate_id", "best_score", "summary"]]
+    con.execute("DELETE FROM zone WHERE run_id = ?", [run_id])
+    con.execute("DELETE FROM zone_member WHERE run_id = ?", [run_id])
+    con.register("_zone", zdf)
+    con.execute("INSERT INTO zone SELECT * FROM _zone")
+    con.unregister("_zone")
+    con.executemany("INSERT INTO zone_member VALUES (?, ?, ?)", members)
+    print(f"[zones] {len(cands)} markets -> {len(zdf)} zones")
+    return len(zdf)
