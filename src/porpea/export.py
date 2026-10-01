@@ -16,8 +16,10 @@ MAP_TEMPLATE = """<!doctype html>
 </head><body><div id="map"></div><script>
 const data = __DATA__;
 const map = L.map('map');
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-  {attribution: '&copy; OpenStreetMap contributors'}).addTo(map);
+// CARTO basemap: OSM's own tile servers reject pages opened from a local file (no Referer).
+L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+  subdomains: 'abcd', maxZoom: 20,
+  attribution: '&copy; OpenStreetMap contributors &copy; CARTO'}).addTo(map);
 const color = s => s >= 75 ? '#1a9850' : s >= 60 ? '#91cf60' : s >= 45 ? '#fee08b' : '#d73027';
 const layer = L.geoJSON(data, {
   pointToLayer: (f, ll) => L.circleMarker(ll, {radius: 7, color: '#333', weight: 1,
