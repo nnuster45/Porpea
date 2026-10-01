@@ -17,7 +17,7 @@ pip install -e .
 ```bash
 porpea --config config/settings.yaml demo-seed
 porpea analyze
-# เปิด data/out/<run_id>/map.html
+porpea serve      # เปิดแผนที่ในเบราว์เซอร์ (อย่าดับเบิลคลิก map.html ตรงๆ พื้นหลังจะไม่ขึ้น)
 ```
 
 ## รันกับข้อมูลจริง
@@ -45,7 +45,7 @@ porpea analyze
 ผลลัพธ์อยู่ที่ `data/out/<run_id>/`:
 - `top_candidates.csv` — import เข้า Google My Maps ได้ทันที
 - `top_candidates.geojson` — เปิดใน kepler.gl / QGIS
-- `map.html` — แผนที่ คลิกดูคะแนนย่อยแต่ละ feature
+- `map.html` — แผนที่ คลิกดูคะแนนย่อยแต่ละ feature (เปิดด้วย `porpea serve`)
 
 ปรับ factor / รัศมี / น้ำหนัก ได้ที่ `config/settings.yaml` แล้วรัน `porpea features && porpea score && porpea export`
 

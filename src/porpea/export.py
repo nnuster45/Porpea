@@ -16,10 +16,16 @@ MAP_TEMPLATE = """<!doctype html>
 </head><body><div id="map"></div><script>
 const data = __DATA__;
 const map = L.map('map');
-// CARTO basemap: OSM's own tile servers reject pages opened from a local file (no Referer).
-L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-  subdomains: 'abcd', maxZoom: 20,
-  attribution: '&copy; OpenStreetMap contributors &copy; CARTO'}).addTo(map);
+// Tile servers reject pages opened as file:// (no Referer) -- open via `porpea serve`.
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'}).addTo(map);
+if (location.protocol === 'file:') {
+  const note = L.control({position: 'topright'});
+  note.onAdd = () => Object.assign(document.createElement('div'), {
+    style: 'background:#fff3cd;padding:6px 10px;border:1px solid #c9a227;font:14px sans-serif',
+    textContent: 'แผนที่พื้นหลังไม่ขึ้นเมื่อเปิดไฟล์ตรง ให้รัน: porpea serve'});
+  note.addTo(map);
+}
 const color = s => s >= 75 ? '#1a9850' : s >= 60 ? '#91cf60' : s >= 45 ? '#fee08b' : '#d73027';
 const layer = L.geoJSON(data, {
   pointToLayer: (f, ll) => L.circleMarker(ll, {radius: 7, color: '#333', weight: 1,
@@ -35,6 +41,29 @@ const layer = L.geoJSON(data, {
 map.fitBounds(layer.getBounds(), {padding: [20, 20]});
 </script></body></html>
 """
+
+
+def latest_run_dir(con, cfg: dict) -> Path:
+    run_id = con.execute(
+        "SELECT run_id FROM score_run ORDER BY created_at DESC LIMIT 1").fetchone()[0]
+    return Path(cfg["out_dir"]) / run_id
+
+
+def serve(directory: Path, port: int = 8000) -> None:
+    """Serve map.html over http://localhost so tile servers receive a Referer."""
+    import functools
+    import webbrowser
+    from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+    handler = functools.partial(SimpleHTTPRequestHandler, directory=str(directory))
+    with ThreadingHTTPServer(("127.0.0.1", port), handler) as httpd:
+        url = f"http://localhost:{port}/map.html"
+        print(f"[serve] {url}  (Ctrl+C to stop)")
+        webbrowser.open(url)
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            pass
 
 
 def export(con, cfg: dict, run_id: str | None = None, top_n: int | None = None) -> Path:

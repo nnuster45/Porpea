@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from porpea import analysis, demo, export
 from porpea.collectors import factories, google_places, osm, population
@@ -31,6 +32,9 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("export", help="CSV/GeoJSON/map of top candidates")
     p.add_argument("--run-id")
     p.add_argument("--top", type=int)
+    p = sub.add_parser("serve", help="open the latest map.html via http://localhost")
+    p.add_argument("--run-id")
+    p.add_argument("--port", type=int, default=8000)
     sub.add_parser("analyze", help="candidates + features + score + export")
     sub.add_parser("demo-seed", help="insert synthetic Chonburi data for a dry run")
 
@@ -55,6 +59,11 @@ def main(argv: list[str] | None = None) -> None:
         analysis.score(con, cfg)
     elif args.cmd == "export":
         export.export(con, cfg, args.run_id, args.top)
+    elif args.cmd == "serve":
+        out = Path(cfg["out_dir"]) / args.run_id if args.run_id else export.latest_run_dir(con, cfg)
+        con.close()
+        export.serve(out, args.port)
+        return
     elif args.cmd == "analyze":
         analysis.build_candidates(con, cfg)
         analysis.compute_features(con, cfg)
